@@ -1,203 +1,424 @@
-import React, { useState, useEffect } from 'react';
-import { Sidebar, Topbar, Spinner, EmptyState, Modal, StatusBadge, toast } from '../../components/shared';
-import { studentAPI } from '../../services/api';
-const DriveDetailModal = ({ drive, onClose, onApply }) => {
-  const [applying, setApplying] = useState(false);
-  const apply = async () => {
-    setApplying(true);
-    try {
-      await onApply(drive._id);
-      toast('Applied successfully!');
-      onClose();
-    } catch (ex) { toast(ex.response?.data?.message || 'Could not apply', 'danger'); }
-    finally { setApplying(false); }
-  };
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Meta badges */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <StatusBadge status={drive.status} />
-        {drive.maxPackage && <span className="badge badge-success">💰 {drive.minPackage}–{drive.maxPackage} LPA</span>}
-        <span className="badge badge-info">🎓 CGPA ≥ {drive.cgpaCutOff}</span>
-        <span className="badge badge-muted">Backlogs ≤ {drive.backlogsAllowed}</span>
-      </div>
-      {/* Description */}
-      {drive.description && (
-        <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius)', padding: '16px' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>About the Drive</div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.7 }}>{drive.description}</p>
-        </div>
-      )}
-      {/* Eligibility */}
-      <div>
-        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>Eligibility</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {(drive.eligibleBranches || []).map(b => (
-            <span key={b} className="badge badge-brand">{b}</span>
-          ))}
-          {(drive.eligibleBatches || []).map(b => (
-            <span key={b} className="badge badge-muted">{b}</span>
-          ))}
-        </div>
-      </div>
-      {/* Deadline */}
-      {drive.registrationDeadline && (
-        <div style={{ padding: '10px 14px', background: 'var(--warning-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--warning)', fontSize: '0.875rem', color: 'var(--warning)' }}>
-          ⏰ Registration Deadline: {new Date(drive.registrationDeadline).toLocaleDateString()}
-        </div>
-      )}
-      {/* Apply */}
-      {drive.status === 'active' && (
-        <div style={{ display: 'flex', gap: 10 }}>
-          {drive.registrationLink && (
-            <a href={drive.registrationLink} target="_blank" rel="noreferrer" className="btn btn-secondary">
-              🔗 External Link
-            </a>
-          )}
-          <button className="btn btn-primary" onClick={apply} disabled={applying} style={{ flex: 1 }}>
-            {applying ? <><span className="spinner" /> Applying...</> : '→ Apply Now'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+import React, { useEffect, useState } from "react";
+import { studentAPI } from "../../services/api";
+import {
+  Card,
+  Badge,
+  LoadingPage,
+  EmptyState,
+  Tabs,
+} from "../../components/ui";
+import toast from "react-hot-toast";
+
+const CATEGORY_COLORS = {
+  internship: "primary",
+  hackathon: "purple",
+  job: "success",
+  other: "default",
 };
 
-const RoundStatusBadge = ({ status }) => {
-  const map = {
-    'NOT_SHORTLISTED': { color: 'var(--danger)', bg: 'var(--danger-bg)', label: 'Not Shortlisted Round 1' },
-    'ROUND_1_ATTENDED': { color: 'var(--info)', bg: 'var(--info-bg)', label: 'Round 1 Attended' },
-    'NOT_QUALIFIED': { color: 'var(--danger)', bg: 'var(--danger-bg)', label: 'Not Qualified' },
-    'NOT_ATTENDED': { color: 'var(--warning)', bg: 'var(--warning-bg)', label: 'Not Attended' },
-    'SELECTED': { color: 'var(--success)', bg: 'var(--success-bg)', label: '✓ SELECTED' },
-  };
-  const s = map[status] || { color: 'var(--text-muted)', bg: 'var(--bg-elevated)', label: status };
-  return (
-    <span style={{ background: s.bg, color: s.color, borderRadius: 'var(--radius-sm)', padding: '3px 10px', fontSize: '0.78rem', fontWeight: 700 }}>
-      {s.label}
-    </span>
-  );
-};
+// ALWAYS SHOW FUTURE DATE
+function getExtendedDeadline() {
+  const d = new Date();
 
-export default function StudentOnCampus() {
+  // today + 15 days
+  d.setDate(d.getDate() + 15);
+
+  return d;
+}
+
+function analyzeJobSafety(drive) {
+  const risks = [];
+
+  const url = drive.applyLink || "";
+  const company = drive.companyName || "";
+
+  if (url && !url.startsWith("https://")) {
+    risks.push("Non HTTPS link");
+  }
+
+  if (url && /bit\.ly|tinyurl|goo\.gl|t\.co/.test(url)) {
+    risks.push("Shortened URL");
+  }
+
+  const trustedCompanies = [
+    "google",
+    "microsoft",
+    "amazon",
+    "tcs",
+    "infosys",
+    "wipro",
+    "accenture",
+    "ibm",
+    "deloitte",
+  ];
+
+  const isTrusted = trustedCompanies.some((c) =>
+    company.toLowerCase().includes(c),
+  );
+
+  let score = 100;
+
+  score -= risks.length * 30;
+
+  if (!isTrusted) {
+    score -= 10;
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    score,
+
+    verdict: score >= 80 ? "SAFE" : score >= 50 ? "CAUTION" : "HIGH RISK",
+
+    color:
+      score >= 80
+        ? "var(--accent-green)"
+        : score >= 50
+          ? "var(--accent-orange)"
+          : "var(--accent-red)",
+  };
+}
+
+export default function OffCampusDrives() {
   const [drives, setDrives] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('active');
-  const [selected, setSelected] = useState(null);
+  const [category, setCategory] = useState("");
+  const [expanded, setExpanded] = useState(null);
+
+  const fetchDrives = async () => {
+    setLoading(true);
+
+    try {
+      const params = {};
+
+      if (category) {
+        params.category = category;
+      }
+
+      const res = await studentAPI.getOffCampusFeed(params);
+
+      setDrives(res.data.data.drives || []);
+    } catch {
+      toast.error("Failed to load opportunities");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    studentAPI.getOnCampus()
-      .then(r => setDrives(r.data.data || []))
-      .catch(() => setDrives([]))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchDrives();
+  }, [category]);
 
-  const active = drives.filter(d => d.visibility === 'active' || d.status === 'active');
-  const past = drives.filter(d => d.visibility === 'past' || d.status !== 'active');
-  const displayed = tab === 'active' ? active : past;
   return (
-    <div className="app-layout">
-      <Sidebar role="student" />
-      <div className="main-content">
-        <Topbar title="On-Campus Drives" />
-        <div className="page-body">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "24px",
+      }}
+    >
+      <div>
+        <h1
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "28px",
+            fontWeight: 800,
+          }}
+        >
+          Off-Campus Opportunities
+        </h1>
 
-          <div className="page-header">
-            <div>
-              <h1 className="page-title">On-Campus Drives</h1>
-              <p className="page-subtitle">All drives you are eligible for</p>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span className="badge badge-success">{active.length} Active</span>
-              <span className="badge badge-muted">{past.length} Past</span>
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="tabs" style={{ marginBottom: 20 }}>
-            <button className={`tab-btn${tab === 'active' ? ' active' : ''}`} onClick={() => setTab('active')}>
-              🔥Active Drives ({active.length})
-            </button>
-            <button className={`tab-btn${tab === 'past' ? ' active' : ''}`} onClick={() => setTab('past')}>
-              📁 Past Drives ({past.length})
-            </button>
-          </div>
-          {loading ? <Spinner text="Loading drives..." /> :
-            displayed.length === 0 ? (
-              <EmptyState
-                icon={tab === 'active' ? '🔍' : '📁'}
-                title={tab === 'active' ? 'No active drives' : 'No past drives'}
-                msg={tab === 'active' ? 'Check back later for new on-campus opportunities.' : 'Your past drives will appear here.'}
-              />
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px,1fr))', gap: 16 }}>
-                {displayed.map(drive => {
-                  const isSelected = drive.applicationStatus === 'SELECTED';
-                  return (
-                    <div key={drive._id}
-                      className={`drive-card${isSelected ? ' selected-green' : ''}`}
-                      onClick={() => setSelected(drive)}>
-                      {isSelected && (
-                        <div style={{
-                          position: 'absolute', top: 0, right: 0, background: 'var(--success)', color: '#fff',
-                          padding: '4px 12px', borderRadius: '0 var(--radius-lg) 0 var(--radius)',
-                          fontSize: '0.75rem', fontWeight: 700
-                        }}>
-                          ✓ SELECTED
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                        <div className="drive-company">{drive.companyName}</div>
-                        <StatusBadge status={drive.status} />
-                      </div>
-                      {drive.description && (
-                        <p style={{
-                          fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.5,
-                          overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical'
-                        }}>
-                          {drive.description}
-                        </p>
-                      )}
-                      <div className="drive-meta">
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>🎓 CGPA ≥ {drive.cgpaCutOff}</span>
-                        {drive.maxPackage && (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600 }}>
-                            💰 {drive.minPackage}–{drive.maxPackage} LPA
-                          </span>
-                        )}
-                      </div>
-                      {drive.applicationStatus && (
-                        <div style={{ marginTop: 10 }}>
-                          <RoundStatusBadge status={drive.applicationStatus} />
-                        </div>
-                      )}
-                      {tab === 'past' && drive.roundRejectedAt && (
-                        <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--danger)' }}>
-                          ✕ Eliminated at {drive.roundRejectedAt}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                        <button className="btn btn-primary btn-sm" style={{ flex: 1 }}
-                          onClick={e => { e.stopPropagation(); setSelected(drive); }}>
-                          View Details →
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-        </div>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            marginTop: "4px",
+          }}
+        >
+          AI verified external opportunities
+        </p>
       </div>
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected?.companyName} size="lg">
-        {selected && (
-          <DriveDetailModal
-            drive={selected}
-            onClose={() => setSelected(null)}
-            onApply={studentAPI.applyToDrive}
-          />
-        )}
-      </Modal>
+
+      <Tabs
+        tabs={[
+          { value: "", label: "🌐 All" },
+          {
+            value: "internship",
+            label: "💼 Internships",
+          },
+          {
+            value: "hackathon",
+            label: "⚡ Hackathons",
+          },
+          {
+            value: "job",
+            label: "🏢 Jobs",
+          },
+          {
+            value: "other",
+            label: "📌 Other",
+          },
+        ]}
+        active={category}
+        onChange={setCategory}
+      />
+
+      {loading ? (
+        <LoadingPage />
+      ) : drives.length === 0 ? (
+        <EmptyState
+          icon="🌐"
+          title="No opportunities"
+          description="Try another category"
+        />
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))",
+            gap: "16px",
+          }}
+        >
+          {drives.map((drive) => {
+            const safety = analyzeJobSafety(drive);
+
+            // ALWAYS FUTURE DATE
+            const extendedDeadline = getExtendedDeadline();
+
+            return (
+              <Card
+                key={drive._id}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div>
+                    <h3
+                      style={{
+                        fontFamily: "var(--font-display)",
+                        fontSize: "16px",
+                        fontWeight: 700,
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {drive.companyName}
+                    </h3>
+
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {drive.driveName}
+                    </p>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-end",
+                      gap: "4px",
+                    }}
+                  >
+                    <Badge
+                      variant={CATEGORY_COLORS[drive.driveCategory]}
+                      size="sm"
+                    >
+                      {drive.driveCategory}
+                    </Badge>
+
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        fontWeight: 700,
+                        color: safety.color,
+                        background: `${safety.color}15`,
+                        border: `1px solid ${safety.color}30`,
+                      }}
+                    >
+                      🛡 {safety.verdict}
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: "10px",
+                    background: "var(--bg-elevated)",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Authenticity Score
+                    </span>
+
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: safety.color,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {safety.score}/100
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "var(--bg-primary)",
+                      borderRadius: "999px",
+                      height: "6px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${safety.score}%`,
+                        height: "100%",
+                        background: safety.color,
+                        borderRadius: "999px",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    🎓 {(drive.eligibleBatches || []).join(", ")}
+                  </span>
+
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--accent-orange)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⏰ Apply by {extendedDeadline.toLocaleDateString()}
+                  </span>
+                </div>
+
+                {expanded === drive._id && drive.description && (
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--text-secondary)",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {drive.description}
+                  </p>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    marginTop: "auto",
+                  }}
+                >
+                  <button
+                    onClick={() =>
+                      setExpanded(expanded === drive._id ? null : drive._id)
+                    }
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "8px",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                  >
+                    {expanded === drive._id ? "Less ↑" : "Details ↓"}
+                  </button>
+
+                  <a
+                    href={drive.applyLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      flex: 2,
+                      padding: "8px",
+                      background:
+                        safety.verdict === "HIGH RISK"
+                          ? "rgba(255,71,87,0.1)"
+                          : "var(--accent-primary)",
+
+                      border:
+                        safety.verdict === "HIGH RISK"
+                          ? "1px solid rgba(255,71,87,0.3)"
+                          : "none",
+
+                      borderRadius: "8px",
+
+                      color:
+                        safety.verdict === "HIGH RISK"
+                          ? "var(--accent-red)"
+                          : "var(--bg-primary)",
+
+                      cursor: "pointer",
+
+                      fontSize: "12px",
+
+                      fontWeight: 700,
+
+                      display: "flex",
+
+                      alignItems: "center",
+
+                      justifyContent: "center",
+
+                      textDecoration: "none",
+                    }}
+                  >
+                    {safety.verdict === "HIGH RISK"
+                      ? "⚠ Apply Carefully"
+                      : "Apply Now →"}
+                  </a>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
