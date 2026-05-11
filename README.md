@@ -117,17 +117,17 @@ This feature helps students avoid fake placement opportunities and improves trus
 ## Architecture Overview
 
 ```text
-Frontend (React + Tailwind CSS)
+        Frontend (React)
                 ↓
 Backend REST API (Node.js + Express)
                 ↓
-Authentication Layer (JWT)
+  Authentication Layer (JWT)
                 ↓
-MongoDB Database
+        MongoDB Database
                 ↓
-AI Services Layer
-        ↙                ↘
-AI Chatbot        Fake Job Detection
+        AI Services Layer
+          ↙            ↘
+  AI Chatbot     Fake Job Detection
 ```
 
 ---
@@ -135,7 +135,6 @@ AI Chatbot        Fake Job Detection
 ## Frontend
 
 - React.js
-- Tailwind CSS
 - Axios
 - React Router DOM
 
@@ -182,7 +181,6 @@ AI Chatbot        Fake Job Detection
 | Category | Technology |
 |---|---|
 | Frontend | React.js |
-| Styling | Tailwind CSS |
 | Backend | Node.js |
 | Framework | Express.js |
 | Database | MongoDB |
