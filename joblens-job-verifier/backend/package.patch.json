@@ -1,0 +1,11 @@
+{
+  "_comment": "ADD @anthropic-ai/sdk to your existing CCPDMS_FINAL/package.json dependencies",
+  "_instruction": "Run this command in your CCPDMS_FINAL folder:",
+  "_command": "npm install @anthropic-ai/sdk",
+
+  "dependencies_to_add": {
+    "@anthropic-ai/sdk": "^0.24.0"
+  },
+
+  "_note": "axios is already available via the frontend. The backend already has nodemailer, mongoose, express, etc. Only @anthropic-ai/sdk is new."
+}
